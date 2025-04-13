@@ -259,7 +259,10 @@ class NaverEstateCrawler:
                 "div[role='dialog']", 
                 ".modal_wrap",
                 ".popup_wrap",
-                "button.btn_close"
+                "button.btn_close",
+                ".dialog_wrap",  # 2024 UI 업데이트 선택자 추가
+                ".property_type_selector",  # 2024 UI 업데이트 선택자 추가
+                ".popup_content"  # 2024 UI 업데이트 선택자 추가
             ]
             
             for selector in housing_type_selectors:
@@ -268,7 +271,7 @@ class NaverEstateCrawler:
                     for element in elements:
                         if element.is_displayed():
                             # 닫기 버튼이 있으면 닫기
-                            close_buttons = element.find_elements(By.CSS_SELECTOR, ".btn_close, .close, button[aria-label='닫기']")
+                            close_buttons = element.find_elements(By.CSS_SELECTOR, ".btn_close, .close, button[aria-label='닫기'], .btn_popup_close")
                             if close_buttons:
                                 for btn in close_buttons:
                                     if btn.is_displayed():
@@ -278,24 +281,34 @@ class NaverEstateCrawler:
                                         break
                             
                             # 아파트 유형 선택
-                            apt_buttons = element.find_elements(By.CSS_SELECTOR, "button, .btn, .btn_type, .type_item")
+                            apt_buttons = element.find_elements(By.CSS_SELECTOR, "button, .btn, .btn_type, .type_item, .item_apt, [class*='apt']")
                             for btn in apt_buttons:
                                 if "아파트" in btn.text:
                                     btn.click()
                                     print("아파트 유형 선택 완료")
                                     time.sleep(2)
                                     break
-                except:
+                except Exception as e:
+                    print(f"주택유형 선택자 {selector} 처리 중 오류: {e}")
                     continue
         except Exception as e:
             print(f"주택유형 선택 처리 중 오류: {e}")
         
-        # 추가 로딩을 위해 스크롤 다운
-        for _ in range(3):  # 스크롤 횟수 감소
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")  # 절반만 스크롤
-            time.sleep(1)
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")  # 전체 스크롤
-            time.sleep(2)
+        # 추가 로딩을 위해 스크롤 다운 - 점진적 스크롤로 개선
+        try:
+            # 총 높이
+            total_height = self.driver.execute_script("return document.body.scrollHeight")
+            # 스크롤 간격을 4등분으로 나누어 부드럽게 스크롤
+            for i in range(1, 5):
+                target_height = (total_height * i) // 4
+                self.driver.execute_script(f"window.scrollTo(0, {target_height});")
+                time.sleep(1.5)  # 각 스크롤 후 대기 시간
+        except Exception as e:
+            print(f"스크롤 처리 중 오류: {e}")
+            # 기본 스크롤 시도
+            for _ in range(3):
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
             
         # 디버깅용 페이지 소스 저장
         source_path = os.path.join(self.debug_dir, "debug_source.html")
@@ -325,25 +338,33 @@ class NaverEstateCrawler:
             
             # 네이버 부동산 매물 목록에서 사용되는 공통 클래스 또는 속성들 (빨간색 영역의 매물들)
             item_patterns = [
-                # 네이버 부동산 매물 항목
+                # 네이버 부동산 매물 항목 - 2024 업데이트 이후 새로운 선택자들 추가
                 "article", "li[class*='item']", "div[class*='item']", 
                 "div[class*='_item']", ".complex_item", ".estate_item", 
                 ".article_item", ".VRqzXH_apartment", ".item_link",
                 
-                # 네이버 부동산 아파트 리스트
+                # 네이버 부동산 아파트 리스트 - 2024 업데이트 후 새로운 선택자
                 "li.area_item", "li[class*='article']", ".article_list > li",
                 ".item_list li", ".complex_list li", ".article_list_item",
+                ".property_item", ".apt_item", ".card_item", ".complex_card",
+                
+                # 2024 최신 네이버 부동산 선택자
+                ".property_card", ".realty_item", ".apt_card", 
+                "[class*='card_wrap']", "[class*='property']", "[data-test-id*='item']",
                 
                 # 더 일반적인 선택자들
-                ".item", ".complex", "[class*='item']", "[class*='article']"
+                ".item", ".complex", "[class*='item']", "[class*='article']",
+                "[class*='card']", "[class*='property']", "[class*='apt']"
             ]
             
             # DOM 요소를 직접 처리하는 대신 일괄 수집 후 안정적으로 정보 추출
             for pattern in item_patterns:
                 try:
                     items = self.driver.find_elements(By.CSS_SELECTOR, pattern)
-                    print(f"{pattern}: {len(items)}개 요소 발견")
                     if items:
+                        count = len(items)
+                        visible_count = sum(1 for item in items if item.is_displayed())
+                        print(f"{pattern}: {count}개 요소 발견 (표시됨: {visible_count}개)")
                         property_items.extend(items)
                 except Exception as e:
                     print(f"매물 패턴 {pattern} 검색 중 오류: {e}")
@@ -659,27 +680,33 @@ class NaverEstateCrawler:
         print(f"상세 정보 페이지 로딩 중: {complex_url}")
         time.sleep(8)  # 로딩 시간 증가
         
-        # 기본 정보를 담을 딕셔너리 초기화
+        # 기본 정보를 담을 딕셔너리 초기화 - 2024년 필드 추가
         detail = {
             "name": "정보 없음",
             "address": "주소 정보 없음",
             "buildYear": "준공년도 정보 없음",
             "totalHouseholds": "세대수 정보 없음",
-            "dealPrice": "매매가 정보 없음"
+            "dealPrice": "매매가 정보 없음",
+            "highestFloor": "층수 정보 없음",
+            "url": complex_url,  # URL 추가 저장
+            "crawlDate": time.strftime("%Y-%m-%d")  # 크롤링 날짜 저장
         }
         
         # 스크린샷 저장
         screenshot_path = os.path.join(self.debug_dir, f"detail_{int(time.time())}.png")
         self.driver.save_screenshot(screenshot_path)
         
-        # 주택유형 선택 처리
+        # 주택유형 선택 처리 - 2024년 UI 업데이트 대응
         try:
             housing_type_selectors = [
                 ".housing_type_selector", 
                 ".select_housing_type",
                 "div[role='dialog']", 
                 ".modal_wrap",
-                ".popup_wrap"
+                ".popup_wrap",
+                ".dialog_wrap",  # 2024 추가
+                ".property_type_selector",  # 2024 추가
+                ".popup_content"  # 2024 추가
             ]
             
             for selector in housing_type_selectors:
@@ -688,7 +715,7 @@ class NaverEstateCrawler:
                     for element in elements:
                         if element.is_displayed():
                             # 닫기 버튼이 있으면 닫기
-                            close_buttons = element.find_elements(By.CSS_SELECTOR, ".btn_close, .close, button[aria-label='닫기']")
+                            close_buttons = element.find_elements(By.CSS_SELECTOR, ".btn_close, .close, button[aria-label='닫기'], .btn_popup_close")
                             if close_buttons:
                                 for btn in close_buttons:
                                     if btn.is_displayed():
@@ -698,14 +725,15 @@ class NaverEstateCrawler:
                                         break
                             
                             # 아파트 유형 선택
-                            apt_buttons = element.find_elements(By.CSS_SELECTOR, "button, .btn, .btn_type, .type_item")
+                            apt_buttons = element.find_elements(By.CSS_SELECTOR, "button, .btn, .btn_type, .type_item, .item_apt, [class*='apt']")
                             for btn in apt_buttons:
                                 if "아파트" in btn.text:
                                     btn.click()
                                     print("상세 페이지에서 아파트 유형 선택 완료")
                                     time.sleep(2)
                                     break
-                except:
+                except Exception as e:
+                    print(f"상세 페이지 주택유형 선택자 {selector} 처리 중 오류: {e}")
                     continue
         except Exception as e:
             print(f"상세 페이지 주택유형 선택 처리 중 오류: {e}")
@@ -722,8 +750,15 @@ class NaverEstateCrawler:
             
             print(f"상세 페이지 제목: '{page_title}'")
             
-            # 페이지가 로딩될 때까지 추가 대기
-            time.sleep(3)
+            # 페이지가 로딩될 때까지 추가 대기 - 2024년 개선사항: 동적 요소 로딩 대기
+            try:
+                # 주요 컨테이너 요소 중 하나가 로딩될 때까지 대기
+                wait = WebDriverWait(self.driver, 10)
+                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".complex_title, .detail_title, .article_info, .complex_info_area")))
+                print("페이지 주요 요소 로딩 완료")
+            except TimeoutException:
+                print("페이지 로딩 대기시간 초과, 계속 진행합니다.")
+                time.sleep(3)
             
             # 1. 타이틀에서 아파트 이름 추출 시도
             if "아파트" in page_title or "오피스텔" in page_title or "주택" in page_title:
@@ -733,7 +768,7 @@ class NaverEstateCrawler:
                     detail["name"] = title_parts[0].strip()
                     print(f"타이틀에서 아파트 이름 추출: {detail['name']}")
             
-            # 2. CSS 선택자로 아파트 이름 추출 시도
+            # 2. CSS 선택자로 아파트 이름 추출 시도 - 2024년 선택자 추가
             if detail["name"] == "정보 없음" or "주택유형" in detail["name"] or "선택" in detail["name"] or "본문" in detail["name"] or "11111" in detail["name"]:
                 name_selectors = [
                     ".complex_title", ".title", "h1.title", ".detail_title", 
@@ -742,16 +777,21 @@ class NaverEstateCrawler:
                     "h2.title", ".property_title", 
                     ".article_title", ".main_title",
                     ".header_complex_name", ".complex_nm",
-                    "div.detail_box_top span.text_title_big",  # 2024 네이버 부동산 구조 추가
+                    "div.detail_box_top span.text_title_big",
                     ".article_info .article_title", 
                     ".complex_info_area .complex_title",
                     ".detail_head .head_title",
                     ".detail_header .detail_title",
-                    ".complex_nm_wrap .complex_nm", # 추가 선택자
-                    ".detail_complex_title", # 추가 선택자
-                    ".complex_info_title", # 추가 선택자
-                    "#complexTitle", # 추가 선택자
-                    ".complex_title_wrap .complex_title" # 추가 선택자
+                    ".complex_nm_wrap .complex_nm",
+                    ".detail_complex_title",
+                    ".complex_info_title",
+                    "#complexTitle",
+                    ".complex_title_wrap .complex_title",
+                    # 2024년 네이버 부동산 추가 선택자
+                    ".property_title", ".apt_name", ".building_title",
+                    "[class*='title_text']", "[class*='aptName']",
+                    ".detail_main_title", ".apt_detail_title",
+                    ".property_detail_title", ".realty_title"
                 ]
                 
                 for selector in name_selectors:
@@ -766,7 +806,8 @@ class NaverEstateCrawler:
                                     break
                         if detail["name"] != "정보 없음" and "주택유형" not in detail["name"] and "선택" not in detail["name"] and "본문" not in detail["name"] and "11111" not in detail["name"]:
                             break
-                    except:
+                    except Exception as e:
+                        print(f"이름 선택자 {selector} 추출 중 오류: {e}")
                         continue
             
             # 3. 메타 태그에서 제목 추출 시도
@@ -1088,34 +1129,72 @@ class NaverEstateCrawler:
         # 데이터 전처리 - 잘못된 데이터 처리
         cleaned_data = []
         for item in data:
+            # 기본값 설정
+            cleaned_item = {
+                "name": "정보 없음",
+                "address": "주소 정보 없음",
+                "buildYear": "준공년도 정보 없음",
+                "totalHouseholds": "세대수 정보 없음",
+                "dealPrice": "매매가 정보 없음",
+                "highestFloor": "층수 정보 없음",
+                "crawlDate": time.strftime("%Y-%m-%d")
+            }
+            # 기존 값 복사
+            for key, value in item.items():
+                cleaned_item[key] = value
+            
             # 이름이 네이버 부동산 또는 본문 영역인 경우 제외
-            if "네이버" in item.get("name", "") or "본문" in item.get("name", ""):
-                print(f"부적절한 데이터 항목 제외: {item.get('name', '')}")
+            if "네이버" in cleaned_item.get("name", "") or "본문" in cleaned_item.get("name", ""):
+                print(f"부적절한 데이터 항목 제외: {cleaned_item.get('name', '')}")
                 continue
                 
             # 주소가 없는 경우 URL에서 좌표 추출
-            if item.get("address") == "주소 정보 없음" or item.get("address") == "알 수 없음":
-                link = item.get("link", "")
+            if cleaned_item.get("address") == "주소 정보 없음" or cleaned_item.get("address") == "알 수 없음":
+                link = cleaned_item.get("link", "")
                 if link:
                     coords_match = re.search(r'ms=([0-9.]+),([0-9.]+)', link)
                     if coords_match:
-                        item["address"] = f"좌표 {coords_match.group(1)},{coords_match.group(2)} 인근"
+                        cleaned_item["address"] = f"좌표 {coords_match.group(1)},{coords_match.group(2)} 인근"
                     else:
-                        item["address"] = item.get("info", "주소 정보 없음")
+                        cleaned_item["address"] = cleaned_item.get("info", "주소 정보 없음")
+            
+            # 데이터 정규화 - 준공년도
+            buildYear = cleaned_item.get("buildYear", "")
+            if buildYear and buildYear != "준공년도 정보 없음":
+                # 숫자만 추출
+                year_match = re.search(r'(\d{4})', buildYear)
+                if year_match:
+                    cleaned_item["buildYear"] = year_match.group(1) + "년"
+            
+            # 데이터 정규화 - 세대수
+            households = cleaned_item.get("totalHouseholds", "")
+            if households and households != "세대수 정보 없음":
+                # 숫자만 추출
+                households_match = re.search(r'([0-9,]+)', households)
+                if households_match:
+                    cleaned_item["totalHouseholds"] = households_match.group(1).replace(",", "") + "세대"
+            
+            # 데이터 정규화 - 가격
+            price = cleaned_item.get("dealPrice", "")
+            if price and price != "매매가 정보 없음":
+                # 표준 형식으로 변환
+                price = re.sub(r'\s+', '', price)  # 공백 제거
+                price = re.sub(r'[^0-9억만원,]', '', price)  # 숫자와 '억', '만', '원', ',' 외 제거
+                cleaned_item["dealPrice"] = price
             
             # 중복된 매물 정보 제거를 위한 키 생성
-            item_key = f"{item.get('name', '')}-{item.get('address', '')}"
+            item_key = f"{cleaned_item.get('name', '')}-{cleaned_item.get('address', '')}"
             if item_key not in [f"{x.get('name', '')}-{x.get('address', '')}" for x in cleaned_data]:
-                cleaned_data.append(item)
+                cleaned_data.append(cleaned_item)
             else:
-                print(f"중복 매물 제외: {item.get('name', '')}")
+                print(f"중복 매물 제외: {cleaned_item.get('name', '')}")
         
         try:
             # 데이터프레임 생성
             df = pd.DataFrame(cleaned_data)
             
             # 컬럼 정리 및 순서 정하기
-            important_columns = ["name", "address", "buildYear", "totalHouseholds", "dealPrice", "highestFloor"]
+            important_columns = ["name", "address", "buildYear", "totalHouseholds", "dealPrice", "highestFloor", "crawlDate", "url"]
             other_columns = [col for col in df.columns if col not in important_columns]
             
             # 중요 컬럼을 먼저 정렬
@@ -1126,12 +1205,22 @@ class NaverEstateCrawler:
             df = df[ordered_columns]
             
             # 디버깅용 미리보기
-            print("\n추출된 데이터 샘플:")
-            print(df[["name", "address", "buildYear", "totalHouseholds", "dealPrice"]].head())
+            columns_to_show = [col for col in ["name", "address", "buildYear", "totalHouseholds", "dealPrice"] if col in df.columns]
+            if columns_to_show:
+                print("\n추출된 데이터 샘플:")
+                print(df[columns_to_show].head())
+            
+            # 백업 파일 생성 (원본 손상 방지)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            backup_filename = f"{os.path.splitext(filename)[0]}_{timestamp}_backup.csv"
             
             # CSV 파일로 저장
             df.to_csv(filename, index=False, encoding='utf-8-sig')
+            # 백업 저장
+            df.to_csv(backup_filename, index=False, encoding='utf-8-sig')
+            
             print(f"데이터를 {filename}에 성공적으로 저장했습니다.")
+            print(f"백업 파일도 {backup_filename}에 저장되었습니다.")
             
             # 저장된 항목 수 표시
             print(f"총 {len(cleaned_data)}개의 유효한 매물 정보가 저장되었습니다.")
@@ -1151,6 +1240,16 @@ class NaverEstateCrawler:
                 if len(valid_addresses) > 0:
                     print(f"지역: {valid_addresses.iloc[0] if not valid_addresses.empty else '정보 없음'}")
             
+            # 통계정보 출력
+            if len(df) > 0:
+                print("\n데이터 통계:")
+                if 'buildYear' in df.columns:
+                    years = df['buildYear'].str.extract(r'(\d{4})').astype(float).dropna()
+                    if not years.empty:
+                        print(f"준공년도 범위: {int(years.min())}년~{int(years.max())}년, 평균: {years.mean():.1f}년")
+                if 'dealPrice' in df.columns and df['dealPrice'].str.contains('억').any():
+                    print(f"가격대 분포: {df['dealPrice'].value_counts().head(3).to_dict()}")
+            
             return filename
         except Exception as e:
             print(f"CSV 저장 중 오류: {str(e)}")
@@ -1162,6 +1261,6 @@ class NaverEstateCrawler:
                         f.write(str(item) + "\n\n")
                 print(f"데이터를 대체 파일 {fallback_file}에 저장했습니다.")
                 return fallback_file
-            except:
-                print("데이터 저장에 실패했습니다.")
+            except Exception as inner_e:
+                print(f"대체 파일 저장 중 오류: {str(inner_e)}")
                 return None
