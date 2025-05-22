@@ -11,16 +11,23 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.keys import Keys
+from datetime import datetime
 
 class NaverEstateCrawler:
     def __init__(self, headless=True):
         self.base_url = "https://new.land.naver.com"
         self.search_url = "https://new.land.naver.com/complexes"
+        self.api_url = "https://new.land.naver.com/api"
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Referer": "https://new.land.naver.com/complexes",
-            "Accept": "*/*",
+            "accept": "*/*",
+            "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+            "sec-ch-ua": '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"macOS"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin"
         }
         self.options = Options()
         if headless:
@@ -291,7 +298,7 @@ class NaverEstateCrawler:
                 except Exception as e:
                     print(f"주택유형 선택자 {selector} 처리 중 오류: {e}")
                     continue
-        except Exception as e:
+        except Exception as e: 
             print(f"주택유형 선택 처리 중 오류: {e}")
         
         # 추가 로딩을 위해 스크롤 다운 - 점진적 스크롤로 개선
@@ -1124,7 +1131,7 @@ class NaverEstateCrawler:
         """
         if not data:
             print("저장할 데이터가 없습니다.")
-            return
+            return None
         
         # 데이터 전처리 - 잘못된 데이터 처리
         cleaned_data = []
@@ -1264,3 +1271,75 @@ class NaverEstateCrawler:
             except Exception as inner_e:
                 print(f"대체 파일 저장 중 오류: {str(inner_e)}")
                 return None
+
+    def get_complex_articles(self, complex_no, page=1):
+        """
+        아파트 단지의 매물 정보를 API를 통해 가져옵니다.
+        """
+        url = f"{self.api_url}/articles/complex/{complex_no}"
+        
+        params = {
+            "realEstateType": "APT:ABYG:JGC:PRE",
+            "tradeType": "",
+            "tag": "::::::",
+            "rentPriceMin": 0,
+            "rentPriceMax": 900000000,
+            "priceMin": 0,
+            "priceMax": 900000000,
+            "areaMin": 0,
+            "areaMax": 900000000,
+            "priceType": "RETAIL",
+            "page": page,
+            "complexNo": complex_no,
+            "type": "list",
+            "order": "rank"
+        }
+        
+        try:
+            response = requests.get(url, headers=self.headers, params=params)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"API 요청 중 오류 발생: {e}")
+            return None
+            
+    def parse_article_data(self, article):
+        """
+        매물 데이터를 파싱합니다.
+        """
+        try:
+            return {
+                "articleNo": article.get("articleNo"),
+                "articleName": article.get("articleName"),
+                "articleConfirmYmd": article.get("articleConfirmYmd"),
+                "tradeTypeName": article.get("tradeTypeName"),
+                "price": article.get("price"),
+                "area": article.get("area"),
+                "floor": article.get("floor"),
+                "direction": article.get("direction"),
+                "dealOrWarrantPrc": article.get("dealOrWarrantPrc"),
+                "rentPrc": article.get("rentPrc"),
+                "maintenanceFee": article.get("maintenanceFee"),
+                "articleStatus": article.get("articleStatus"),
+                "articleFeatureDesc": article.get("articleFeatureDesc"),
+                "realtorName": article.get("realtorName"),
+                "realtorNo": article.get("realtorNo"),
+                "crawlDate": datetime.now().strftime("%Y-%m-%d")
+            }
+        except Exception as e:
+            print(f"매물 데이터 파싱 중 오류: {e}")
+            return None
+            
+    def get_complex_info(self, complex_no):
+        """
+        아파트 단지 정보를 가져옵니다.
+        """
+        url = f"{self.api_url}/complexes/{complex_no}"
+        
+        try:
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"단지 정보 요청 중 오류 발생: {e}")
+            return None
