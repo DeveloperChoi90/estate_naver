@@ -1,222 +1,122 @@
-from naver_estate_crawling import NaverEstateCrawler
+import pandas as pd
 import time
 import os
-import pandas as pd
-import re
-import sys
-from datetime import datetime
-from selenium.webdriver.common.by import By
-import urllib.parse
-
-# 전국 지역 데이터 (지역명과 URL) - 카테고리별로 정리
-REGIONS_BY_CATEGORY = {
-    "서울": [
-        {"name": "서울 강남구", "url": "https://new.land.naver.com/complexes?ms=37.5073421,127.0588579,15&a=APT&e=RETAIL"},
-        {"name": "서울 서초구", "url": "https://new.land.naver.com/complexes?ms=37.4837121,127.0147000,15&a=APT&e=RETAIL"},
-        {"name": "서울 송파구", "url": "https://new.land.naver.com/complexes?ms=37.5048121,127.1144579,15&a=APT&e=RETAIL"},
-        {"name": "서울 강동구", "url": "https://new.land.naver.com/complexes?ms=37.5492077,127.1464824,15&a=APT&e=RETAIL"},
-        {"name": "서울 마포구", "url": "https://new.land.naver.com/complexes?ms=37.5546788,126.9250539,15&a=APT&e=RETAIL"},
-        {"name": "서울 종로구", "url": "https://new.land.naver.com/complexes?ms=37.5728933,126.9793882,15&a=APT&e=RETAIL"},
-        {"name": "서울 중구", "url": "https://new.land.naver.com/complexes?ms=37.5634696,126.9975223,15&a=APT&e=RETAIL"},
-        {"name": "서울 용산구", "url": "https://new.land.naver.com/complexes?ms=37.5311008,126.9809633,15&a=APT&e=RETAIL"},
-        {"name": "서울 성동구", "url": "https://new.land.naver.com/complexes?ms=37.5636557,127.0364335,15&a=APT&e=RETAIL"},
-        {"name": "서울 광진구", "url": "https://new.land.naver.com/complexes?ms=37.5384272,127.0821695,15&a=APT&e=RETAIL"},
-        {"name": "서울 동대문구", "url": "https://new.land.naver.com/complexes?ms=37.5742905,127.0395918,15&a=APT&e=RETAIL"},
-        {"name": "서울 중랑구", "url": "https://new.land.naver.com/complexes?ms=37.6037656,127.0787905,15&a=APT&e=RETAIL"},
-        {"name": "서울 성북구", "url": "https://new.land.naver.com/complexes?ms=37.603969,127.0232185,15&a=APT&e=RETAIL"},
-        {"name": "서울 강북구", "url": "https://new.land.naver.com/complexes?ms=37.6482897,127.0114557,15&a=APT&e=RETAIL"},
-        {"name": "서울 도봉구", "url": "https://new.land.naver.com/complexes?ms=37.6684926,127.0471121,15&a=APT&e=RETAIL"},
-        {"name": "서울 노원구", "url": "https://new.land.naver.com/complexes?ms=37.6563149,127.0750347,15&a=APT&e=RETAIL"},
-        {"name": "서울 은평구", "url": "https://new.land.naver.com/complexes?ms=37.619002,126.9336479,15&a=APT&e=RETAIL"},
-        {"name": "서울 서대문구", "url": "https://new.land.naver.com/complexes?ms=37.577144,126.9559564,15&a=APT&e=RETAIL"},
-        {"name": "서울 양천구", "url": "https://new.land.naver.com/complexes?ms=37.5247151,126.8665356,15&a=APT&e=RETAIL"},
-        {"name": "서울 강서구", "url": "https://new.land.naver.com/complexes?ms=37.5657576,126.8226501,15&a=APT&e=RETAIL"},
-        {"name": "서울 구로구", "url": "https://new.land.naver.com/complexes?ms=37.4954031,126.8874576,15&a=APT&e=RETAIL"},
-        {"name": "서울 금천구", "url": "https://new.land.naver.com/complexes?ms=37.4600969,126.9001546,15&a=APT&e=RETAIL"},
-        {"name": "서울 영등포구", "url": "https://new.land.naver.com/complexes?ms=37.5265454,126.9095492,15&a=APT&e=RETAIL"},
-        {"name": "서울 동작구", "url": "https://new.land.naver.com/complexes?ms=37.4965037,126.9443073,15&a=APT&e=RETAIL"},
-        {"name": "서울 관악구", "url": "https://new.land.naver.com/complexes?ms=37.4781549,126.9514847,15&a=APT&e=RETAIL"}
-    ],
-    "경기도": [
-        {"name": "경기도 성남시", "url": "https://new.land.naver.com/complexes?ms=37.4449168,127.1388684,15&a=APT&e=RETAIL"},
-        {"name": "경기도 용인시", "url": "https://new.land.naver.com/complexes?ms=37.2410864,127.1574276,15&a=APT&e=RETAIL"},
-        {"name": "경기도 수원시", "url": "https://new.land.naver.com/complexes?ms=37.2749785,127.0096295,15&a=APT&e=RETAIL"},
-        {"name": "경기도 부천시", "url": "https://new.land.naver.com/complexes?ms=37.5035917,126.7882882,15&a=APT&e=RETAIL"},
-        {"name": "경기도 고양시", "url": "https://new.land.naver.com/complexes?ms=37.6583599,126.8320201,15&a=APT&e=RETAIL"},
-        {"name": "경기도 안양시", "url": "https://new.land.naver.com/complexes?ms=37.3884559,126.9541475,15&a=APT&e=RETAIL"},
-        {"name": "경기도 남양주시", "url": "https://new.land.naver.com/complexes?ms=37.6357645,127.2165139,15&a=APT&e=RETAIL"},
-        {"name": "경기도 화성시", "url": "https://new.land.naver.com/complexes?ms=37.1990038,127.1066593,15&a=APT&e=RETAIL"},
-        {"name": "경기도 시흥시", "url": "https://new.land.naver.com/complexes?ms=37.3799896,126.8037959,15&a=APT&e=RETAIL"},
-        {"name": "경기도 파주시", "url": "https://new.land.naver.com/complexes?ms=37.7680446,126.7780579,15&a=APT&e=RETAIL"},
-        {"name": "경기도 의정부시", "url": "https://new.land.naver.com/complexes?ms=37.7407293,127.0477856,15&a=APT&e=RETAIL"},
-        {"name": "경기도 김포시", "url": "https://new.land.naver.com/complexes?ms=37.6155311,126.7155962,15&a=APT&e=RETAIL"},
-        {"name": "경기도 평택시", "url": "https://new.land.naver.com/complexes?ms=36.9927064,127.1124344,15&a=APT&e=RETAIL"},
-        {"name": "경기도 광명시", "url": "https://new.land.naver.com/complexes?ms=37.4785065,126.8644800,15&a=APT&e=RETAIL"},
-        {"name": "경기도 광주시", "url": "https://new.land.naver.com/complexes?ms=37.4141111,127.2585898,15&a=APT&e=RETAIL"},
-        {"name": "경기도 안산시", "url": "https://new.land.naver.com/complexes?ms=37.3226694,126.8308083,15&a=APT&e=RETAIL"}
-    ],
-    "광역시": [
-        {"name": "부산광역시", "url": "https://new.land.naver.com/complexes?ms=35.1795543,129.0756416,15&a=APT&e=RETAIL"},
-        {"name": "인천광역시", "url": "https://new.land.naver.com/complexes?ms=37.4562557,126.7052062,15&a=APT&e=RETAIL"},
-        {"name": "대구광역시", "url": "https://new.land.naver.com/complexes?ms=35.8714354,128.6012393,15&a=APT&e=RETAIL"},
-        {"name": "대전광역시", "url": "https://new.land.naver.com/complexes?ms=36.3504119,127.3845475,15&a=APT&e=RETAIL"},
-        {"name": "광주광역시", "url": "https://new.land.naver.com/complexes?ms=35.1595454,126.8526012,15&a=APT&e=RETAIL"},
-        {"name": "울산광역시", "url": "https://new.land.naver.com/complexes?ms=35.5388449,129.3113596,15&a=APT&e=RETAIL"}
-    ],
-    "특별자치시/도": [
-        {"name": "세종특별자치시", "url": "https://new.land.naver.com/complexes?ms=36.5040736,127.2494855,15&a=APT&e=RETAIL"},
-        {"name": "제주특별자치도", "url": "https://new.land.naver.com/complexes?ms=33.4996213,126.5311884,15&a=APT&e=RETAIL"}
-    ],
-    "강원도": [
-        {"name": "강원도 춘천시", "url": "https://new.land.naver.com/complexes?ms=37.8856271,127.7342291,15&a=APT&e=RETAIL"},
-        {"name": "강원도 원주시", "url": "https://new.land.naver.com/complexes?ms=37.3422186,127.9202491,15&a=APT&e=RETAIL"},
-        {"name": "강원도 강릉시", "url": "https://new.land.naver.com/complexes?ms=37.7556468,128.8967813,15&a=APT&e=RETAIL"},
-        {"name": "강원도 속초시", "url": "https://new.land.naver.com/complexes?ms=38.2071701,128.5916426,15&a=APT&e=RETAIL"}
-    ],
-    "충청북도": [
-        {"name": "충청북도 청주시", "url": "https://new.land.naver.com/complexes?ms=36.6424187,127.4890444,15&a=APT&e=RETAIL"},
-        {"name": "충청북도 충주시", "url": "https://new.land.naver.com/complexes?ms=36.9907272,127.9258050,15&a=APT&e=RETAIL"}
-    ],
-    "충청남도": [
-        {"name": "충청남도 홍성군", "url": "https://new.land.naver.com/complexes?ms=36.6016772,126.6611401,15&a=APT&e=RETAIL"},
-        {"name": "충청남도 천안시", "url": "https://new.land.naver.com/complexes?ms=36.8205882,127.1546756,15&a=APT&e=RETAIL"},
-        {"name": "충청남도 아산시", "url": "https://new.land.naver.com/complexes?ms=36.7897160,127.0039833,15&a=APT&e=RETAIL"}
-    ],
-    "전라북도": [
-        {"name": "전라북도 전주시", "url": "https://new.land.naver.com/complexes?ms=35.8242238,127.1479532,15&a=APT&e=RETAIL"},
-        {"name": "전라북도 익산시", "url": "https://new.land.naver.com/complexes?ms=35.9475394,126.9575991,15&a=APT&e=RETAIL"},
-        {"name": "전라북도 군산시", "url": "https://new.land.naver.com/complexes?ms=35.9675997,126.7368831,15&a=APT&e=RETAIL"}
-    ],
-    "전라남도": [
-        {"name": "전라남도 무안군", "url": "https://new.land.naver.com/complexes?ms=34.9917188,126.4789177,15&a=APT&e=RETAIL"},
-        {"name": "전라남도 목포시", "url": "https://new.land.naver.com/complexes?ms=34.8118181,126.3921462,15&a=APT&e=RETAIL"},
-        {"name": "전라남도 여수시", "url": "https://new.land.naver.com/complexes?ms=34.7604268,127.6622188,15&a=APT&e=RETAIL"},
-        {"name": "전라남도 순천시", "url": "https://new.land.naver.com/complexes?ms=34.9504191,127.4874981,15&a=APT&e=RETAIL"}
-    ],
-    "경상북도": [
-        {"name": "경상북도 안동시", "url": "https://new.land.naver.com/complexes?ms=36.5680673,128.7292674,15&a=APT&e=RETAIL"},
-        {"name": "경상북도 포항시", "url": "https://new.land.naver.com/complexes?ms=36.0190411,129.3434641,15&a=APT&e=RETAIL"},
-        {"name": "경상북도 구미시", "url": "https://new.land.naver.com/complexes?ms=36.1199551,128.3443976,15&a=APT&e=RETAIL"},
-        {"name": "경상북도 경주시", "url": "https://new.land.naver.com/complexes?ms=35.8562126,129.2246935,15&a=APT&e=RETAIL"}
-    ],
-    "경상남도": [
-        {"name": "경상남도 창원시", "url": "https://new.land.naver.com/complexes?ms=35.2539903,128.6395211,15&a=APT&e=RETAIL"},
-        {"name": "경상남도 김해시", "url": "https://new.land.naver.com/complexes?ms=35.2359782,128.8869124,15&a=APT&e=RETAIL"},
-        {"name": "경상남도 진주시", "url": "https://new.land.naver.com/complexes?ms=35.1803151,128.1076351,15&a=APT&e=RETAIL"},
-        {"name": "경상남도 통영시", "url": "https://new.land.naver.com/complexes?ms=34.8542093,128.4332745,15&a=APT&e=RETAIL"}
-    ]
-}
-
-# 주택유형 매핑
-HOUSING_TYPES = {
-    "1": {"name": "아파트", "code": "APT"},
-    "2": {"name": "오피스텔", "code": "OPST"},
-    "3": {"name": "빌라/연립", "code": "VL:DDDGG:JGC"},
-    "4": {"name": "단독/다가구", "code": "DDDGG"},
-    "5": {"name": "원룸", "code": "JWJT"},
-    "6": {"name": "상가/사무실", "code": "SGJT:GJCG"},
-    "7": {"name": "지식산업센터", "code": "JGC"},
-    "8": {"name": "토지", "code": "TJ"},
-    "9": {"name": "전체", "code": "APT:OPST:VL:DDDGG:JGC:JWJT:SGJT:GJCG:TJ"}
-}
-
-# 거래방식 매핑
-TRADE_TYPES = {
-    "1": {"name": "매매", "code": "RETAIL"},
-    "2": {"name": "전세", "code": "JWSELL"},
-    "3": {"name": "월세", "code": "MONTH"},
-    "4": {"name": "단기임대", "code": "SHORT"},
-    "5": {"name": "전체", "code": "RETAIL:JWSELL:MONTH:SHORT"}
-}
-
-# 모든 지역 목록 합치기
-ALL_REGIONS = []
-for category, regions in REGIONS_BY_CATEGORY.items():
-    ALL_REGIONS.extend(regions)
-
-def show_menu():
-    print("\n=== 네이버 부동산 크롤러 ===")
-    print("1. 지역별 크롤링")
-    print("2. 특정 단지 크롤링")
-    print("3. 행정구역별 크롤링")
-    print("4. 검색어를 통한 크롤링")
-    print("0. 종료")
-    choice = input("\n작업을 선택하세요: ")
-    return choice
+from tracker import RealEstateTracker
 
 def main():
-    # 크롤러 초기화
-    crawler = NaverEstateCrawler()
-    
-    # 크롤링할 단지 번호 리스트
-    complex_numbers = [
-        "123456",  # 예시 단지 번호
-        "789012"   # 예시 단지 번호
-    ]
-    
-    all_articles = []
-    
-    for complex_no in complex_numbers:
-        print(f"\n단지 번호 {complex_no} 크롤링 시작...")
-        
-        # 단지 정보 가져오기
-        complex_info = crawler.get_complex_info(complex_no)
-        if not complex_info:
-            print(f"단지 {complex_no}의 정보를 가져오는데 실패했습니다.")
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', 1000)
+    # ★ 텍스트가 잘리지 않고 끝까지 나오게 하는 옵션 추가
+    pd.set_option('display.max_colwidth', None)
+    pd.set_option('display.unicode.east_asian_width', True)
+
+    tracker = RealEstateTracker(applyhome_api_key="API_KEY_HERE")
+
+    # 반복 검색을 위한 루프 추가
+    while True:
+        print("\n" + "="*60)
+        print("🏠 부동산 매물 통합 조회 (종료하려면 'q' 또는 '종료' 입력)")
+        print("="*60)
+
+        user_region = input("조회할 지역명을 입력하세요 (예: 마포구, 광명시): ").strip()
+
+        # 종료 로직
+        if user_region.lower() in ['q', 'quit', 'exit', '종료']:
+            print("👋 프로그램을 완전히 종료합니다. 이용해 주셔서 감사합니다.")
+            break
+
+        if not user_region:
+            print("⚠️ 지역명을 입력해야 합니다. 다시 시도해주세요.")
             continue
-            
-        # 매물 정보 가져오기
-        page = 1
-        while True:
-            articles_data = crawler.get_complex_articles(complex_no, page)
-            if not articles_data or not articles_data.get("articleList"):
-                break
-                
-            for article in articles_data["articleList"]:
-                parsed_article = crawler.parse_article_data(article)
-                if parsed_article:
-                    all_articles.append(parsed_article)
+
+        print(f"\n🔍 지역 검색 중: {user_region}...")
+        region_info = tracker.get_region_info(user_region)
+
+        if region_info:
+            print("\n[거래 유형 선택]")
+            print("1: 매매, 2: 전세, 3: 월세")
+            choice = input("번호 입력 (엔터 입력 시 처음으로 이동): ").strip()
+
+            # 입력 없이 넘어가거나 뒤로가기를 원할 때 처리
+            if not choice:
+                continue
+
+            mapping = {'1': 'A1', '2': 'B1', '3': 'B2'}
+            trade_names = {'1': '매매', '2': '전세', '3': '월세'}
+
+            if choice in mapping:
+                print("\n[정렬 기준 선택]")
+                print("1: 랭킹순 (기본값)")
+                print("2: 낮은 가격순")
+                print("3: 높은 가격순")
+                print("4: 최신 등록순")
+                sort_choice = input("번호 입력 (엔터 입력 시 기본값): ").strip()
+
+                sort_mapping = {'1': 'rank', '2': 'prc', '3': 'prcG', '4': 'date'}
+                selected_sort = sort_mapping.get(sort_choice, 'rank')
+
+                limit_input = input("\n출력할 매물 개수를 입력하세요 (엔터 입력 시 기본 15개): ").strip()
+                try:
+                    limit = int(limit_input) if limit_input else 15
+                except ValueError:
+                    limit = 15
+
+                # 검색 시 limit 값을 넘겨주어 해당 개수를 채울 때까지 페이지를 조회하도록 함
+                result = tracker.get_naver_listings(region_info, mapping[choice], selected_sort, limit)
+
+                if result is not None and not result.empty:
+                    print(f"\n✅ 조회 결과 (상위 {len(result)}개):")
+                    print(result)
+
+                    # --- ★ 검색한 지역의 네이버 부동산 링크 생성 및 출력 ---
+                    lat = region_info.get('lat')
+                    lon = region_info.get('lon')
+                    trade_code = mapping[choice]
+
+                    # 지도를 15 레벨 줌으로 설정하고 검색한 유형(매매/전세/월세)과 아파트 필터를 적용한 링크
+                    naver_link = f"https://new.land.naver.com/complexes?ms={lat},{lon},15&a=APT&b={trade_code}&e=RETAIL"
+
+                    print(f"\n🔗 네이버 부동산에서 보기 ({region_info.get('name')}):")
+                    print(naver_link)
                     
-            page += 1
-            time.sleep(1)  # API 요청 간 딜레이
-            
-        print(f"단지 {complex_no} 크롤링 완료")
-        
-    # 결과 저장
-    if all_articles:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"naver_estate_data_{timestamp}.csv"
-        crawler.save_to_csv(all_articles, filename)
-    else:
-        print("크롤링된 매물이 없습니다.")
+                    # --- ★ 관심 매물 CSV 저장 로직 ---
+                    print("\n[관심 매물 저장]")
+                    save_input = input("저장할 매물의 번호(맨 왼쪽 숫자)를 쉼표(,)로 구분하여 입력하세요\n(예: 0, 2, 5) / 건너뛰려면 엔터: ").strip()
+                    
+                    if save_input:
+                        try:
+                            # 입력받은 문자열을 쉼표 기준으로 나누고 정수로 변환 (숫자인 것만)
+                            indices = [int(idx.strip()) for idx in save_input.split(',') if idx.strip().isdigit()]
+                            # 유효한 인덱스 범위 확인
+                            valid_indices = [idx for idx in indices if 0 <= idx < len(result)]
+                            
+                            if valid_indices:
+                                # 선택된 행만 추출
+                                selected_df = result.iloc[valid_indices].copy()
+                                
+                                # 구분을 쉽게 하기 위해 파일 저장 시 지역명과 거래유형 정보 추가
+                                selected_df.insert(0, '검색지역', region_info.get('name'))
+                                selected_df.insert(1, '거래유형', trade_names[choice])
+                                
+                                csv_filename = "selected_listings.csv"
+                                # 파일이 없으면 헤더 포함 저장, 이미 있으면 헤더 없이 이어서 누적 저장(append)
+                                write_header = not os.path.exists(csv_filename)
+                                selected_df.to_csv(csv_filename, mode='a', index=False, encoding='utf-8-sig', header=write_header)
+                                
+                                print(f"✅ 선택하신 {len(valid_indices)}개의 매물이 '{csv_filename}' 파일에 성공적으로 저장(누적)되었습니다!")
+                            else:
+                                print("⚠️ 유효한 번호가 입력되지 않았습니다. 저장을 건너뜁니다.")
+                        except Exception as e:
+                            print(f"❌ 저장 중 오류가 발생했습니다: {e}")
+                else:
+                    print("\n⚠️ 선택하신 조건에 맞는 매물을 찾지 못했습니다.")
+            else:
+                print("❌ 잘못된 입력입니다. 처음부터 다시 시작합니다.")
+        else:
+            print("❌ 지역 정보를 찾을 수 없습니다. 지역명을 다시 확인해 주세요.")
 
-def update_url_with_filters(url, housing_type, trade_type):
-    """URL에 주택유형과 거래방식 필터 적용"""
-    # 기존 URL에서 쿼리 파라미터 분리
-    if '?' in url:
-        base_url, params = url.split('?', 1)
-        params_dict = {}
-        for param in params.split('&'):
-            if '=' in param:
-                key, value = param.split('=', 1)
-                params_dict[key] = value
-    else:
-        base_url = url
-        params_dict = {}
-    
-    # 주택유형과 거래방식 파라미터 설정
-    params_dict['a'] = housing_type
-    params_dict['e'] = trade_type
-    
-    # 모든 거래 표시
-    params_dict['ad'] = 'true'
-    
-    # 새 URL 구성
-    query_params = '&'.join([f"{key}={value}" for key, value in params_dict.items()])
-    new_url = f"{base_url}?{query_params}"
-    
-    return new_url
+        # 결과 출력 후, 콘솔 화면이 바로 넘어가지 않도록 잠시 대기
+        time.sleep(1)
 
-# 스크립트 실행
 if __name__ == "__main__":
     main()

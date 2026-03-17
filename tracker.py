@@ -1,74 +1,14 @@
-# 필수 설치 패키지: pip install curl_cffi pandas
-from curl_cffi import requests
-import json
-import pandas as pd
-from urllib.parse import unquote
 import time
 import random
-import os
+import json
+import pandas as pd
+from api_client import NaverApiClient
+from utils import format_price
 
 class RealEstateTracker:
     def __init__(self, applyhome_api_key=None):
         self.applyhome_api_key = applyhome_api_key
-
-        # 핵심 우회 로직: curl_cffi를 사용하여 실제 Chrome 120 브라우저의 TLS 지문(Fingerprint)으로 위장
-        self.session = requests.Session(impersonate="chrome120")
-
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-        }
-
-        self._initialize_session()
-
-    def _initialize_session(self):
-        """네이버 NNB 쿠키 생성을 위한 초기 방문"""
-        print("🔄 브라우저 세션 초기화 및 쿠키 발급 중 (TLS 우회 모드)...")
-        try:
-            self.session.get("https://www.naver.com/", timeout=10)
-            time.sleep(random.uniform(0.5, 1.0))
-
-            self.session.get("https://new.land.naver.com/", timeout=10)
-            time.sleep(random.uniform(1.0, 2.0))
-            print("✅ 세션 및 TLS 위장 초기화 완료")
-        except Exception as e:
-            print(f"⚠️ 세션 초기화 중 오류: {e}")
-
-    def _request_with_retry(self, url, params=None, headers=None, max_retries=3):
-        """TLS 위장 상태에서의 요청 로직"""
-        for attempt in range(max_retries):
-            time.sleep(random.uniform(0.5, 1.5))
-
-            try:
-                current_headers = headers if headers else self.headers
-                response = self.session.get(url, headers=current_headers, params=params, timeout=15)
-
-                if response.status_code == 200:
-                    return response
-
-                if response.status_code == 429:
-                    wait_time = (2 ** attempt) + random.uniform(1.0, 2.0)
-                    print(f"⚠️ 접속 제한 감지. {wait_time:.1f}초 대기... ({attempt+1}/{max_retries})")
-
-                    if attempt == 1:
-                        self._initialize_session()
-
-                    time.sleep(wait_time)
-                    continue
-
-                print(f"⚠️ 서버 응답 오류: {response.status_code}")
-                return response
-
-            except Exception as e:
-                print(f"⚠️ 연결 오류 발생: {e}")
-                time.sleep(3)
-
-        return None
+        self.api = NaverApiClient()
 
     def _get_entrance_type(self, atcl_no):
         """매물 상세 API를 개별 호출하여 현관구조 추출 (PC API & 모바일 HTML 교차 2중 검증)"""
@@ -78,14 +18,14 @@ class RealEstateTracker:
         # 목록 전체의 로딩 속도 저하를 막기 위해 아주 짧은 딜레이 허용
         time.sleep(random.uniform(0.05, 0.15))
 
-        headers = self.headers.copy()
+        headers = self.api.headers.copy()
 
         # 1차 시도: PC 버전 JSON API 확인
         url_pc = f"https://new.land.naver.com/api/articles/{atcl_no}"
         headers['Referer'] = 'https://new.land.naver.com/'
 
         try:
-            res = self.session.get(url_pc, headers=headers, timeout=5)
+            res = self.api.session.get(url_pc, headers=headers, timeout=5)
             if res.status_code == 200:
                 data = res.json()
 
@@ -110,7 +50,7 @@ class RealEstateTracker:
         headers['Referer'] = 'https://m.land.naver.com/'
 
         try:
-            res = self.session.get(url_mobile, headers=headers, timeout=5)
+            res = self.api.session.get(url_mobile, headers=headers, timeout=5)
             if res.status_code == 200:
                 text = res.text
                 if '계단식' in text: return "계단식"
@@ -126,10 +66,10 @@ class RealEstateTracker:
         url = "https://new.land.naver.com/api/search"
         params = {'keyword': region_query}
 
-        headers = self.headers.copy()
+        headers = self.api.headers.copy()
         headers['Referer'] = 'https://new.land.naver.com/'
 
-        response = self._request_with_retry(url, headers=headers, params=params)
+        response = self.api.request_with_retry(url, custom_headers=headers, params=params)
 
         if not response:
             return None
@@ -157,7 +97,7 @@ class RealEstateTracker:
 
             if base_cortar_no:
                 sub_url = f"https://new.land.naver.com/api/regions/list?cortarNo={base_cortar_no}"
-                sub_response = self._request_with_retry(sub_url, headers=headers)
+                sub_response = self.api.request_with_retry(sub_url, custom_headers=headers)
 
                 if sub_response and sub_response.status_code == 200:
                     sub_data = sub_response.json()
@@ -217,19 +157,6 @@ class RealEstateTracker:
             print(f"❌ 데이터 파싱 에러: {e}")
             return None
 
-    def format_price(self, prc, rent_prc, trade_type):
-        try:
-            def to_korean_unit(val):
-                val = int(val)
-                if val == 0: return ""
-                if val >= 10000:
-                    uk, man = val // 10000, val % 10000
-                    return f"{uk}억 {man:,}만" if man > 0 else f"{uk}억"
-                return f"{val:,}만"
-            if trade_type == "B2": return f"{to_korean_unit(prc)} / {to_korean_unit(rent_prc)}"
-            return to_korean_unit(prc)
-        except: return "가격 미정"
-
     def get_naver_listings(self, region_info, trade_type="A1", sort_type="rank", limit=15):
         trade_dict = {"A1": "매매", "B1": "전세", "B2": "월세"}
         sort_dict = {"rank": "랭킹순", "prc": "낮은 가격순", "prcG": "높은 가격순", "date": "최신 등록순"}
@@ -241,7 +168,7 @@ class RealEstateTracker:
         print(f"🔍 매물 검색 중: {region_info.get('name')} [{trade_dict[trade_type]} - {sort_dict[sort_type]}] (최대 {limit}개)...")
 
         url = "https://m.land.naver.com/cluster/ajax/articleList"
-        headers = self.headers.copy()
+        headers = self.api.headers.copy()
         headers['Referer'] = 'https://m.land.naver.com/'
 
         parsed_data = []
@@ -261,7 +188,7 @@ class RealEstateTracker:
                     'cortarNo': cortar_no  # ★ 이 파라미터를 추가하여 주변 지역(예: 철산동)이 나오는 것을 원천 차단
                 }
 
-                response = self._request_with_retry(url, headers=headers, params=params)
+                response = self.api.request_with_retry(url, custom_headers=headers, params=params)
 
                 if not response or not response.text.strip():
                     break
@@ -307,7 +234,7 @@ class RealEstateTracker:
                         '층': flr_info,
                         '방향': item.get('direction', ''),
                         '현관구조': '-', # 일단 빈값으로 세팅 후 최종 결과에서만 업데이트
-                        '가격': self.format_price(raw_prc, raw_rent, trade_type),
+                        '가격': format_price(raw_prc, raw_rent, trade_type),
                         '면적': f"{spc2}㎡",
                         '특징': item.get('atclFetrDesc', ''),
                         # 내부 정렬을 위해 원시(raw) 가격 데이터 및 계산된 정렬값 저장
@@ -357,118 +284,3 @@ class RealEstateTracker:
         except Exception as e:
             print(f"❌ 매물 리스트 생성 중 에러: {e}")
             return pd.DataFrame()
-
-if __name__ == "__main__":
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', 1000)
-    # ★ 텍스트가 잘리지 않고 끝까지 나오게 하는 옵션 추가
-    pd.set_option('display.max_colwidth', None)
-    pd.set_option('display.unicode.east_asian_width', True)
-
-    tracker = RealEstateTracker(applyhome_api_key="API_KEY_HERE")
-
-    # 반복 검색을 위한 루프 추가
-    while True:
-        print("\n" + "="*60)
-        print("🏠 부동산 매물 통합 조회 (종료하려면 'q' 또는 '종료' 입력)")
-        print("="*60)
-
-        user_region = input("조회할 지역명을 입력하세요 (예: 마포구, 광명시): ").strip()
-
-        # 종료 로직
-        if user_region.lower() in ['q', 'quit', 'exit', '종료']:
-            print("👋 프로그램을 완전히 종료합니다. 이용해 주셔서 감사합니다.")
-            break
-
-        if not user_region:
-            print("⚠️ 지역명을 입력해야 합니다. 다시 시도해주세요.")
-            continue
-
-        print(f"\n🔍 지역 검색 중: {user_region}...")
-        region_info = tracker.get_region_info(user_region)
-
-        if region_info:
-            print("\n[거래 유형 선택]")
-            print("1: 매매, 2: 전세, 3: 월세")
-            choice = input("번호 입력 (엔터 입력 시 처음으로 이동): ").strip()
-
-            # 입력 없이 넘어가거나 뒤로가기를 원할 때 처리
-            if not choice:
-                continue
-
-            mapping = {'1': 'A1', '2': 'B1', '3': 'B2'}
-            trade_names = {'1': '매매', '2': '전세', '3': '월세'}
-
-            if choice in mapping:
-                print("\n[정렬 기준 선택]")
-                print("1: 랭킹순 (기본값)")
-                print("2: 낮은 가격순")
-                print("3: 높은 가격순")
-                print("4: 최신 등록순")
-                sort_choice = input("번호 입력 (엔터 입력 시 기본값): ").strip()
-
-                sort_mapping = {'1': 'rank', '2': 'prc', '3': 'prcG', '4': 'date'}
-                selected_sort = sort_mapping.get(sort_choice, 'rank')
-
-                limit_input = input("\n출력할 매물 개수를 입력하세요 (엔터 입력 시 기본 15개): ").strip()
-                try:
-                    limit = int(limit_input) if limit_input else 15
-                except ValueError:
-                    limit = 15
-
-                # 검색 시 limit 값을 넘겨주어 해당 개수를 채울 때까지 페이지를 조회하도록 함
-                result = tracker.get_naver_listings(region_info, mapping[choice], selected_sort, limit)
-
-                if result is not None and not result.empty:
-                    print(f"\n✅ 조회 결과 (상위 {len(result)}개):")
-                    print(result)
-
-                    # --- ★ 검색한 지역의 네이버 부동산 링크 생성 및 출력 ---
-                    lat = region_info.get('lat')
-                    lon = region_info.get('lon')
-                    trade_code = mapping[choice]
-
-                    # 지도를 15 레벨 줌으로 설정하고 검색한 유형(매매/전세/월세)과 아파트 필터를 적용한 링크
-                    naver_link = f"https://new.land.naver.com/complexes?ms={lat},{lon},15&a=APT&b={trade_code}&e=RETAIL"
-
-                    print(f"\n🔗 네이버 부동산에서 보기 ({region_info.get('name')}):")
-                    print(naver_link)
-                    
-                    # --- ★ 관심 매물 CSV 저장 로직 ---
-                    print("\n[관심 매물 저장]")
-                    save_input = input("저장할 매물의 번호(맨 왼쪽 숫자)를 쉼표(,)로 구분하여 입력하세요\n(예: 0, 2, 5) / 건너뛰려면 엔터: ").strip()
-                    
-                    if save_input:
-                        try:
-                            # 입력받은 문자열을 쉼표 기준으로 나누고 정수로 변환 (숫자인 것만)
-                            indices = [int(idx.strip()) for idx in save_input.split(',') if idx.strip().isdigit()]
-                            # 유효한 인덱스 범위 확인
-                            valid_indices = [idx for idx in indices if 0 <= idx < len(result)]
-                            
-                            if valid_indices:
-                                # 선택된 행만 추출
-                                selected_df = result.iloc[valid_indices].copy()
-                                
-                                # 구분을 쉽게 하기 위해 파일 저장 시 지역명과 거래유형 정보 추가
-                                selected_df.insert(0, '검색지역', region_info.get('name'))
-                                selected_df.insert(1, '거래유형', trade_names[choice])
-                                
-                                csv_filename = "selected_listings.csv"
-                                # 파일이 없으면 헤더 포함 저장, 이미 있으면 헤더 없이 이어서 누적 저장(append)
-                                write_header = not os.path.exists(csv_filename)
-                                selected_df.to_csv(csv_filename, mode='a', index=False, encoding='utf-8-sig', header=write_header)
-                                
-                                print(f"✅ 선택하신 {len(valid_indices)}개의 매물이 '{csv_filename}' 파일에 성공적으로 저장(누적)되었습니다!")
-                            else:
-                                print("⚠️ 유효한 번호가 입력되지 않았습니다. 저장을 건너뜁니다.")
-                        except Exception as e:
-                            print(f"❌ 저장 중 오류가 발생했습니다: {e}")
-                else:
-                    print("\n⚠️ 선택하신 조건에 맞는 매물을 찾지 못했습니다.")
-            else:
-                print("❌ 잘못된 입력입니다. 처음부터 다시 시작합니다.")
-        else:
-            print("❌ 지역 정보를 찾을 수 없습니다. 지역명을 다시 확인해 주세요.")
-
-        # 결과 출력 후, 콘솔 화면이 바로 넘어가지 않도록 잠시 대기
-        time.sleep(1)
