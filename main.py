@@ -55,14 +55,34 @@ def main():
                 sort_mapping = {'1': 'rank', '2': 'prc', '3': 'prcG', '4': 'date'}
                 selected_sort = sort_mapping.get(sort_choice, 'rank')
 
+       # --- ★ 면적 필터 입력 추가 ---
+                print("\n[면적 필터 선택]")
+                area_input = input("최소면적과 최대면적(㎡)을 쉼표(,)로 구분하여 입력하세요 (예: 59, 84) / 건너뛰려면 엔터: ").strip()
+                min_area, max_area = None, None
+                if area_input:
+                    try:
+                        # 입력값을 쉼표로 분리하고, 각 값을 float으로 변환
+                        area_parts = [float(x.strip()) for x in area_input.split(',') if x.strip()]
+                        if len(area_parts) == 1:
+                            min_area = area_parts[0]
+                        elif len(area_parts) >= 2:
+                            min_area = area_parts[0]
+                            max_area = area_parts[1]
+                    except ValueError:
+                        print("⚠️ 면적 입력이 올바르지 않습니다. 숫자만 입력해주세요.")
+                        continue
+
+
                 limit_input = input("\n출력할 매물 개수를 입력하세요 (엔터 입력 시 기본 15개): ").strip()
                 try:
                     limit = int(limit_input) if limit_input else 15
                 except ValueError:
                     limit = 15
+                    print("⚠️ 잘못된 입력입니다. 기본값인 15개로 설정합니다.")
 
-                # 검색 시 limit 값을 넘겨주어 해당 개수를 채울 때까지 페이지를 조회하도록 함
-                result = tracker.get_naver_listings(region_info, mapping[choice], selected_sort, limit)
+
+                # 검색 시 면적 필터 인자(min_area, max_area)를 함께 넘겨줌
+                result = tracker.get_naver_listings(region_info, mapping[choice], selected_sort, limit, min_area, max_area)
 
                 if result is not None and not result.empty:
                     print(f"\n✅ 조회 결과 (상위 {len(result)}개):")

@@ -157,7 +157,7 @@ class RealEstateTracker:
             print(f"❌ 데이터 파싱 에러: {e}")
             return None
 
-    def get_naver_listings(self, region_info, trade_type="A1", sort_type="rank", limit=15):
+    def get_naver_listings(self, region_info, trade_type="A1", sort_type="rank", limit=15, min_area=None, max_area=None):
         trade_dict = {"A1": "매매", "B1": "전세", "B2": "월세"}
         sort_dict = {"rank": "랭킹순", "prc": "낮은 가격순", "prcG": "높은 가격순", "date": "최신 등록순"}
 
@@ -165,7 +165,14 @@ class RealEstateTracker:
         lon = float(region_info.get('lon'))
         cortar_no = region_info.get('cortarNo')  # 지역 번호 추출
 
-        print(f"🔍 매물 검색 중: {region_info.get('name')} [{trade_dict[trade_type]} - {sort_dict[sort_type]}] (최대 {limit}개)...")
+        # 출력용 면적 필터 메시지 생성
+        area_filter_msg = ""
+        if min_area is not None or max_area is not None:
+            min_str = f"{min_area}㎡" if min_area else "0㎡"
+            max_str = f"{max_area}㎡" if max_area else "제한없음"
+            area_filter_msg = f" [면적: {min_str} ~ {max_str}]"
+
+        print(f"🔍 매물 검색 중: {region_info.get('name')} [{trade_dict[trade_type]} - {sort_dict[sort_type]}]{area_filter_msg} (최대 {limit}개)...")
 
         url = "https://m.land.naver.com/cluster/ajax/articleList"
         headers = self.api.headers.copy()
@@ -212,6 +219,20 @@ class RealEstateTracker:
                     bild_nm_dtl = f"{item.get('bildNm', '')} {item.get('dtlAddr', '')}".strip()
                     flr_info = item.get('flrInfo', '')
                     spc2 = item.get('spc2', '')
+
+                    # --- ★ 면적(㎡) 필터링 로직 추가 ---
+                    if min_area is not None or max_area is not None:
+                        try:
+                            # str()을 추가하여 숫자형 등 비문자열 타입도 처리하고, 변환 실패 시 안전하게 건너뛰도록 수정
+                            area_val = float(str(spc2)) if spc2 else 0.0
+                            
+                            if min_area is not None and area_val < min_area:
+                                continue
+                            if max_area is not None and area_val > max_area:
+                                continue
+                        except (ValueError, TypeError):
+                            # 면적 정보를 숫자로 변환할 수 없는 경우, 해당 매물은 필터링에서 제외
+                            continue
 
                     unique_key = (atcl_nm, bild_nm_dtl, flr_info, raw_prc, raw_rent, spc2)
 

@@ -49,7 +49,7 @@ class NaverApiClient:
                     print(f"⚠️ 접속 제한 감지. {wait_time:.1f}초 대기... ({attempt+1}/{max_retries})")
 
                     if attempt == 1:
-                        self._initialize_session()
+                        self._initialize_session()  
 
                     time.sleep(wait_time)
                     continue
